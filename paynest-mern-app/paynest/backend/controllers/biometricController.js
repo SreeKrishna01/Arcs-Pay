@@ -80,7 +80,7 @@ const verifyRegistration = async (req, res) => {
 
     user.credentials.push({
       credentialId: Buffer.from(credential.id, "base64url"),
-      publicKey: credential.publicKey,
+      publicKey:  Buffer.from(credential.publicKey),
       counter: credential.counter,
       transports: credential.transports || [],
       deviceName: deviceName || "Your device",
