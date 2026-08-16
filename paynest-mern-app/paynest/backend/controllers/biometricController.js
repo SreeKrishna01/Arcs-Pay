@@ -28,7 +28,7 @@ const generateRegisterOptions = async (req, res) => {
       rpID: RP_ID,
       userName: user.mobile,
       userDisplayName: user.name,
-      userID: user._id.toBuffer(),
+      userID: Buffer.from(user._id.id),
       attestationType: "none",
       authenticatorSelection: {
         authenticatorAttachment: "platform",
