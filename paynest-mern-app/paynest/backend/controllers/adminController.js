@@ -39,52 +39,51 @@ const login = async (req, res) => {
       });
     }
 
-    const ADMIN_EMAIL = "iiyyanar478@gmail.com";
-    const ADMIN_PASSWORD = "CHANGE_THIS_PASSWORD";
-    const ADMIN_MOBILE = "9999999999";
+    const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+    const adminPassword = process.env.ADMIN_PASSWORD;
 
-    // Check fixed admin credentials
-    if (
-      identifier.toLowerCase().trim() !== ADMIN_EMAIL.toLowerCase() ||
-      password !== ADMIN_PASSWORD
-    ) {
-      return res.status(401).json({
-        message: "Invalid admin credentials",
+    if (!adminEmail || !adminPassword) {
+      console.error("ADMIN_EMAIL or ADMIN_PASSWORD is missing");
+      return res.status(500).json({
+        message: "Admin credentials are not configured on server",
       });
     }
 
-    // Find admin account
-    let user = await User.findOne({
-      email: ADMIN_EMAIL.toLowerCase(),
+    // Check email and password
+    if (
+      identifier.trim().toLowerCase() !== adminEmail ||
+      password !== adminPassword
+    ) {
+      return res.status(401).json({
+        message: "Invalid admin email or password",
+      });
+    }
+
+    // Find admin in the USERS collection
+    const user = await User.findOne({
+      email: adminEmail,
       role: "admin",
     });
 
-    // Create admin automatically if it doesn't exist
     if (!user) {
-      user = await User.create({
-        name: "Arcs Pay Admin",
-        email: ADMIN_EMAIL.toLowerCase(),
-        mobile: ADMIN_MOBILE,
-        password: ADMIN_PASSWORD,
-        role: "admin",
-        isActive: true,
-        balance: ADMIN_BALANCE,
-        upiId: "admin@arcspay",
+      return res.status(401).json({
+        message: "Admin account not found",
       });
     }
 
-    // Make sure admin is active
     if (!user.isActive) {
-      user.isActive = true;
-      await user.save();
+      return res.status(403).json({
+        message: "Admin account is blocked",
+      });
     }
 
     const token = generateToken(user._id);
 
-    return res.json({
+    return res.status(200).json({
       token,
       user: user.toSafeObject(),
     });
+
   } catch (err) {
     console.error("Admin login error:", err);
 
@@ -93,7 +92,6 @@ const login = async (req, res) => {
     });
   }
 };
-
 // @route GET /api/admin/me
 const getMe = async (req, res) => {
   res.json({ user: req.user.toSafeObject() });
