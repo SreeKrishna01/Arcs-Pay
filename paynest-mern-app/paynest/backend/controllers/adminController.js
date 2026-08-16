@@ -31,29 +31,57 @@ const login = async (req, res) => {
     const { identifier, password } = req.body;
 
     if (!identifier || !password) {
-      return res.status(400).json({ message: "Email/mobile and password are required" });
+      return res.status(400).json({
+        message: "Email/mobile and password are required",
+      });
     }
 
+    // Admin credentials
+    const ADMIN_EMAIL = "iiyyanar478@gmail.com";
+    const ADMIN_PASSWORD = "282006";
+
+    if (
+      identifier.toLowerCase().trim() !== ADMIN_EMAIL.toLowerCase() ||
+      password !== ADMIN_PASSWORD
+    ) {
+      return res.status(401).json({
+        message: "Invalid admin credentials",
+      });
+    }
+
+    // Find the admin account in MongoDB
     const user = await User.findOne({
+      email: ADMIN_EMAIL.toLowerCase(),
       role: "admin",
-      $or: [{ email: identifier.toLowerCase() }, { mobile: identifier }],
     });
 
-    if (!user || !(await user.matchPassword(password))) {
-      return res.status(401).json({ message: "Invalid admin credentials" });
+    if (!user) {
+      return res.status(404).json({
+        message:
+          "Admin account not found in database. Create an admin user first.",
+      });
     }
 
     if (!user.isActive) {
-      return res.status(403).json({ message: "Admin account is blocked" });
+      return res.status(403).json({
+        message: "Admin account is blocked",
+      });
     }
 
     const token = generateToken(user._id);
-    res.json({ token, user: user.toSafeObject() });
+
+    res.json({
+      token,
+      user: user.toSafeObject(),
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Admin login error:", err);
+
+    res.status(500).json({
+      message: err.message,
+    });
   }
 };
-
 // @route GET /api/admin/me
 const getMe = async (req, res) => {
   res.json({ user: req.user.toSafeObject() });
