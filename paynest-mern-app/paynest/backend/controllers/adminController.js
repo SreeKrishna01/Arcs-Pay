@@ -7,6 +7,9 @@ const Card = require("../models/Card");
 const Recipient = require("../models/Recipient");
 const Notification = require("../models/Notification");
 
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
 const ADMIN_BALANCE = 100000;
 
 const generateToken = (id) => {
