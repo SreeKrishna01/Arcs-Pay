@@ -15,7 +15,11 @@ const TransactionSchema = new mongoose.Schema(
     counterpartyUpi: { type: String },
     category: { type: String, default: "Transfer" },
     note: { type: String, default: "" },
-    method: { type: String, enum: ["UPI", "Card", "Net Banking", "Wallet"], default: "UPI" },
+   method: {
+  type: String,
+  enum: ["UPI", "Card", "Net Banking", "Wallet", "Fingerprint"],
+  default: "UPI",
+},
     status: { type: String, enum: ["success", "pending", "failed"], default: "success" },
     fromLabel: { type: String }, // e.g. bank account display used for this txn
   },
