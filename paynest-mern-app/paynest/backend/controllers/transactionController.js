@@ -75,17 +75,19 @@ const sendMoney = async (req, res) => {
       });
     }
 
-    // Check UPI PIN
-    if (!sender.upiPin) {
+    // Verify payment
+    if (!sender.upiPin && !fingerprintToken) {
       return res.status(400).json({
-        message: "Please set up your UPI PIN in Security settings first",
+        message: "Please set up your UPI PIN or fingerprint first",
       });
     }
 
     let authorizedByFingerprint = false;
 
     if (pin) {
-      if (!(await sender.matchUpiPin(pin))) {
+      const validPin = await sender.matchUpiPin(pin);
+
+      if (!validPin) {
         return res.status(400).json({
           message: "Incorrect UPI PIN",
         });
@@ -107,14 +109,14 @@ const sendMoney = async (req, res) => {
         }
 
         authorizedByFingerprint = true;
-      } catch {
+      } catch (err) {
         return res.status(400).json({
           message: "Fingerprint verification expired. Please try again.",
         });
       }
     } else {
       return res.status(400).json({
-        message: "Please enter your UPI PIN or verify with fingerprint",
+        message: "Please enter your UPI PIN",
       });
     }
 
@@ -125,9 +127,10 @@ const sendMoney = async (req, res) => {
       });
     }
 
-    // Find receiver using UPI ID
+    // Find receiver
     const receiver = await User.findOne({
       upiId: upiId.trim().toLowerCase(),
+      role: "user",
     });
 
     if (!receiver) {
@@ -136,36 +139,33 @@ const sendMoney = async (req, res) => {
       });
     }
 
-    // Prevent sending to yourself
     if (receiver._id.toString() === sender._id.toString()) {
       return res.status(400).json({
         message: "You cannot send money to yourself",
       });
     }
 
-    // Check receiver is active
     if (!receiver.isActive) {
       return res.status(400).json({
         message: "Recipient account is blocked",
       });
     }
 
-    // -----------------------------
-    // TRANSFER MONEY
-    // -----------------------------
+    // Generate different transaction IDs
+    const senderTxnId = generateTxnId();
+    const receiverTxnId = generateTxnId();
 
+    // Update balances
     sender.balance -= numericAmount;
     receiver.balance += numericAmount;
 
     await sender.save();
     await receiver.save();
 
-    const transactionId = generateTxnId();
-
-    // Sender transaction
+    // Create sender transaction
     const senderTransaction = await Transaction.create({
       user: sender._id,
-      transactionId,
+      transactionId: senderTxnId,
       direction: "debit",
       type: "sent",
       amount: numericAmount,
@@ -178,10 +178,10 @@ const sendMoney = async (req, res) => {
       fromLabel: fromLabel || "Arcs Pay Wallet",
     });
 
-    // Receiver transaction
-    await Transaction.create({
+    // Create receiver transaction
+    const receiverTransaction = await Transaction.create({
       user: receiver._id,
-      transactionId,
+      transactionId: receiverTxnId,
       direction: "credit",
       type: "received",
       amount: numericAmount,
@@ -216,6 +216,7 @@ const sendMoney = async (req, res) => {
 
     return res.status(201).json({
       transaction: senderTransaction,
+      receiverTransaction,
       balance: sender.balance,
       receiver: {
         name: receiver.name,
@@ -234,7 +235,6 @@ const sendMoney = async (req, res) => {
     });
   }
 };
-
 // @route POST /api/transactions/add-money
 const addMoney = async (req, res) => {
   try {
