@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const Transaction = require("../models/Transaction");
+const User = require("../models/User");
 const BankAccount = require("../models/BankAccount");
 const Notification = require("../models/Notification");
 
@@ -48,56 +49,128 @@ const getTransactionById = async (req, res) => {
 // @route POST /api/transactions/send
 const sendMoney = async (req, res) => {
   try {
-    const { name, upiId, amount, note, pin, fromLabel, fingerprintToken } = req.body;
-    const user = req.user;
+    const {
+      name,
+      upiId,
+      amount,
+      note,
+      pin,
+      fromLabel,
+      fingerprintToken,
+    } = req.body;
+
+    const sender = req.user;
 
     if (!name || !upiId || !amount) {
-      return res.status(400).json({ message: "Recipient and amount are required" });
+      return res.status(400).json({
+        message: "Recipient and amount are required",
+      });
     }
 
     const numericAmount = Number(amount);
+
     if (!numericAmount || numericAmount <= 0) {
-      return res.status(400).json({ message: "Enter a valid amount" });
+      return res.status(400).json({
+        message: "Enter a valid amount",
+      });
     }
 
-    if (!user.upiPin) {
-      return res.status(400).json({ message: "Please set up your UPI PIN in Security settings first" });
+    // Check UPI PIN
+    if (!sender.upiPin) {
+      return res.status(400).json({
+        message: "Please set up your UPI PIN in Security settings first",
+      });
     }
 
     let authorizedByFingerprint = false;
+
     if (pin) {
-      if (!(await user.matchUpiPin(pin))) {
-        return res.status(400).json({ message: "Incorrect UPI PIN" });
+      if (!(await sender.matchUpiPin(pin))) {
+        return res.status(400).json({
+          message: "Incorrect UPI PIN",
+        });
       }
     } else if (fingerprintToken) {
       try {
-        const decoded = jwt.verify(fingerprintToken, process.env.JWT_SECRET);
-        if (decoded.sub !== user._id.toString() || decoded.purpose !== "payment") {
-          return res.status(400).json({ message: "Invalid fingerprint verification" });
+        const decoded = jwt.verify(
+          fingerprintToken,
+          process.env.JWT_SECRET
+        );
+
+        if (
+          decoded.sub !== sender._id.toString() ||
+          decoded.purpose !== "payment"
+        ) {
+          return res.status(400).json({
+            message: "Invalid fingerprint verification",
+          });
         }
+
         authorizedByFingerprint = true;
       } catch {
-        return res.status(400).json({ message: "Fingerprint verification expired. Please try again." });
+        return res.status(400).json({
+          message: "Fingerprint verification expired. Please try again.",
+        });
       }
     } else {
-      return res.status(400).json({ message: "Please enter your UPI PIN or verify with fingerprint" });
+      return res.status(400).json({
+        message: "Please enter your UPI PIN or verify with fingerprint",
+      });
     }
 
-    if (numericAmount > user.balance) {
-      return res.status(400).json({ message: "Insufficient balance" });
+    // Check sender balance
+    if (numericAmount > sender.balance) {
+      return res.status(400).json({
+        message: "Insufficient balance",
+      });
     }
 
-    user.balance -= numericAmount;
-    await user.save();
+    // Find receiver using UPI ID
+    const receiver = await User.findOne({
+      upiId: upiId.trim().toLowerCase(),
+    });
 
-    const transaction = await Transaction.create({
-      user: user._id,
-      transactionId: generateTxnId(),
+    if (!receiver) {
+      return res.status(404).json({
+        message: "Recipient not found",
+      });
+    }
+
+    // Prevent sending to yourself
+    if (receiver._id.toString() === sender._id.toString()) {
+      return res.status(400).json({
+        message: "You cannot send money to yourself",
+      });
+    }
+
+    // Check receiver is active
+    if (!receiver.isActive) {
+      return res.status(400).json({
+        message: "Recipient account is blocked",
+      });
+    }
+
+    // -----------------------------
+    // TRANSFER MONEY
+    // -----------------------------
+
+    sender.balance -= numericAmount;
+    receiver.balance += numericAmount;
+
+    await sender.save();
+    await receiver.save();
+
+    const transactionId = generateTxnId();
+
+    // Sender transaction
+    const senderTransaction = await Transaction.create({
+      user: sender._id,
+      transactionId,
       direction: "debit",
       type: "sent",
       amount: numericAmount,
-      counterpartyName: name,
-      counterpartyUpi: upiId,
+      counterpartyName: receiver.name,
+      counterpartyUpi: receiver.upiId,
       category: "Transfer",
       note: note || "",
       method: authorizedByFingerprint ? "Fingerprint" : "UPI",
@@ -105,16 +178,60 @@ const sendMoney = async (req, res) => {
       fromLabel: fromLabel || "Arcs Pay Wallet",
     });
 
+    // Receiver transaction
+    await Transaction.create({
+      user: receiver._id,
+      transactionId,
+      direction: "credit",
+      type: "received",
+      amount: numericAmount,
+      counterpartyName: sender.name,
+      counterpartyUpi: sender.upiId,
+      category: "Transfer",
+      note: note || "",
+      method: authorizedByFingerprint ? "Fingerprint" : "UPI",
+      status: "success",
+      fromLabel: sender.name,
+    });
+
+    // Sender notification
     await Notification.create({
-      user: user._id,
+      user: sender._id,
       title: "Transaction Successful",
-      message: `Paid \u20b9${numericAmount.toLocaleString("en-IN")} to ${name}`,
+      message: `Paid ₹${numericAmount.toLocaleString(
+        "en-IN"
+      )} to ${receiver.name}`,
       type: "transaction_successful",
     });
 
-    res.status(201).json({ transaction, balance: user.balance });
+    // Receiver notification
+    await Notification.create({
+      user: receiver._id,
+      title: "Money Received",
+      message: `₹${numericAmount.toLocaleString(
+        "en-IN"
+      )} received from ${sender.name}`,
+      type: "payment_received",
+    });
+
+    return res.status(201).json({
+      transaction: senderTransaction,
+      balance: sender.balance,
+      receiver: {
+        name: receiver.name,
+        upiId: receiver.upiId,
+      },
+      message: `₹${numericAmount.toLocaleString(
+        "en-IN"
+      )} sent successfully`,
+    });
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Send money error:", err);
+
+    return res.status(500).json({
+      message: err.message,
+    });
   }
 };
 
