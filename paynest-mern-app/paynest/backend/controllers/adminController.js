@@ -36,10 +36,11 @@ const login = async (req, res) => {
       });
     }
 
-    // Admin credentials
     const ADMIN_EMAIL = "iiyyanar478@gmail.com";
-    const ADMIN_PASSWORD = "282006";
+    const ADMIN_PASSWORD = "CHANGE_THIS_PASSWORD";
+    const ADMIN_MOBILE = "9999999999";
 
+    // Check fixed admin credentials
     if (
       identifier.toLowerCase().trim() !== ADMIN_EMAIL.toLowerCase() ||
       password !== ADMIN_PASSWORD
@@ -49,39 +50,47 @@ const login = async (req, res) => {
       });
     }
 
-    // Find the admin account in MongoDB
-    const user = await User.findOne({
+    // Find admin account
+    let user = await User.findOne({
       email: ADMIN_EMAIL.toLowerCase(),
       role: "admin",
     });
 
+    // Create admin automatically if it doesn't exist
     if (!user) {
-      return res.status(404).json({
-        message:
-          "Admin account not found in database. Create an admin user first.",
+      user = await User.create({
+        name: "Arcs Pay Admin",
+        email: ADMIN_EMAIL.toLowerCase(),
+        mobile: ADMIN_MOBILE,
+        password: ADMIN_PASSWORD,
+        role: "admin",
+        isActive: true,
+        balance: ADMIN_BALANCE,
+        upiId: "admin@arcspay",
       });
     }
 
+    // Make sure admin is active
     if (!user.isActive) {
-      return res.status(403).json({
-        message: "Admin account is blocked",
-      });
+      user.isActive = true;
+      await user.save();
     }
 
     const token = generateToken(user._id);
 
-    res.json({
+    return res.json({
       token,
       user: user.toSafeObject(),
     });
   } catch (err) {
     console.error("Admin login error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
     });
   }
 };
+
 // @route GET /api/admin/me
 const getMe = async (req, res) => {
   res.json({ user: req.user.toSafeObject() });
